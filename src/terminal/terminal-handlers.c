@@ -885,6 +885,10 @@ int guac_terminal_csi(guac_terminal* term, unsigned char c) {
                 if (flag != NULL)
                     *flag = true;
 
+                /* Open alternate screen buffer */
+                if (argv[0] == 1049)
+                    guac_terminal_switch_buffers(term, true);
+
                 break;
 
             /* l: Reset Mode */
@@ -894,6 +898,10 @@ int guac_terminal_csi(guac_terminal* term, unsigned char c) {
                 flag = __guac_terminal_get_flag(term, argv[0], private_mode_character);
                 if (flag != NULL)
                     *flag = false;
+                
+                /* Close alternate screen buffer */
+                if (argv[0] == 1049)
+                    guac_terminal_switch_buffers(term, false);
 
                 break;
 
