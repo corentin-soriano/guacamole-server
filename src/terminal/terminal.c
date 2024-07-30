@@ -1940,6 +1940,55 @@ static void guac_terminal_double_click(guac_terminal* terminal, int row, int col
 
 }
 
+/**
+ * Selection of a line during a triple click event.
+ *  - Get buffer row boundaries if it has been wrapped.
+ *  - Visual selection of the line.
+ *  - Adding it to clipboard.
+ *
+ * @param terminal
+ *     The terminal that received a triple click event.
+ *
+ * @param row
+ *     The row where is the mouse at the triple click event.
+ * 
+ * @param col
+ *     The column where is the mouse at the triple click event.
+ */
+static void guac_terminal_triple_click(guac_terminal* terminal, int row, int col) {
+
+    /* Temporarily reading previous and next lines */
+    guac_terminal_buffer_row* buffer_row;
+
+    /* Final boundary rows */
+    int top_row = row;
+    int bottom_row = row;
+
+    /* Get top boundary */
+    do {
+
+        /* Read previous buffer row */
+        buffer_row = guac_terminal_buffer_get_row(terminal->buffer, top_row - 1, 0);
+
+    /* Go to the previous row if it is wrapped */
+    } while (buffer_row->wrapped_row && top_row--);
+
+    /* Get bottom boundary */
+    do {
+
+        /* Read current buffer row */
+        buffer_row = guac_terminal_buffer_get_row(terminal->buffer, bottom_row, 0);
+
+    /* Go to the next row if current row is wrapped */
+    } while (buffer_row->wrapped_row && bottom_row++);
+
+    /* Start selection on first col of top_row */
+    guac_terminal_select_start(terminal, top_row, 0);
+
+    /* End selection on last col of bottom_row */
+    guac_terminal_select_update(terminal, bottom_row, buffer_row->length - 1);
+}
+
 static int __guac_terminal_send_mouse(guac_terminal* term, guac_user* user,
         int x, int y, int mask) {
 
@@ -2028,8 +2077,7 @@ static int __guac_terminal_send_mouse(guac_terminal* term, guac_user* user,
 
                     /* third click or more = line selection */
                     default:
-                        guac_terminal_select_start(term, row, 0);
-                        guac_terminal_select_update(term, row, term->display->width);
+                        guac_terminal_triple_click(term, row, col);
                         break;
                 }
             }
