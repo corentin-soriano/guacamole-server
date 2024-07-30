@@ -109,7 +109,8 @@ void guac_terminal_select_redraw(guac_terminal* terminal) {
         else
             end_column += terminal->selection_end_width - 1;
 
-        guac_terminal_display_select(terminal->display, start_row, start_column, end_row, end_column);
+        guac_terminal_display_select(terminal->display, start_row,
+                start_column, end_row, end_column, terminal->mod_alt);
 
     }
 
@@ -371,18 +372,37 @@ void guac_terminal_select_end(guac_terminal* terminal) {
     /* Otherwise, copy multiple rows */
     else {
 
+        /* If rectangular selection, each row boundaries must 
+         * match start_col/end_col, otherwise use whole rows */
+        int start_col_bound = terminal->mod_alt ? start_col : 0;
+        int end_col_bound = terminal->mod_alt ? end_col : -1;
+
+        /* Get last char of the row */
+        guac_terminal_buffer_row* buffer_row = guac_terminal_buffer_get_row(terminal->buffer, start_row, 0);
+
         /* Store first row */
-        guac_terminal_clipboard_append_row(terminal, start_row, start_col, -1);
+        guac_terminal_clipboard_append_row(terminal, start_row, start_col, end_col_bound);
 
         /* Store all middle rows */
         for (int row = start_row + 1; row < end_row; row++) {
-            guac_common_clipboard_append(terminal->clipboard, "\n", 1);
-            guac_terminal_clipboard_append_row(terminal, row, 0, -1);
+
+            /* Add a new line only if the line was not wrapped or rectangular selection */
+            if (buffer_row->wrapped_row == false || terminal->mod_alt)
+                guac_common_clipboard_append(terminal->clipboard, "\n", 1);
+
+            /* Store middle row */
+            guac_terminal_clipboard_append_row(terminal, row, start_col_bound, end_col_bound);
+
+            /* Update to last char of current row */
+            buffer_row = guac_terminal_buffer_get_row(terminal->buffer, row, 0);
         }
 
+        /* Add a new line only if the line was not wrapped or rectangular selection */
+        if (buffer_row->wrapped_row == false || terminal->mod_alt)
+            guac_common_clipboard_append(terminal->clipboard, "\n", 1);
+
         /* Store last row */
-        guac_common_clipboard_append(terminal->clipboard, "\n", 1);
-        guac_terminal_clipboard_append_row(terminal, end_row, 0, end_col);
+        guac_terminal_clipboard_append_row(terminal, end_row, start_col_bound, end_col);
 
     }
 

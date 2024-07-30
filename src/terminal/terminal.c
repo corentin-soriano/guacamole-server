@@ -242,9 +242,10 @@ void guac_terminal_reset(guac_terminal* term) {
     /* Reset display palette */
     guac_terminal_display_reset_palette(term->display);
 
-    /* Clear terminal */
+    /* Clear terminal with a row length of term_width-1 
+     * to avoid exceed the size of the display layer */
     for (row=0; row<term->term_height; row++)
-        guac_terminal_set_columns(term, row, 0, term->term_width, &(term->default_char));
+        guac_terminal_set_columns(term, row, 0, term->term_width-1, &(term->default_char));
 
 }
 
@@ -1809,28 +1810,6 @@ static bool guac_terminal_is_blank(int ascii_char) {
 }
 
 /**
- * Get the char (int ASCII code) at a specific row/col of the display.
- *
- * @param terminal
- *     The terminal on which we want to read a character.
- *
- * @param row
- *     The row where to read the character.
- * 
- * @param col
- *     The column where to read the character.
- * 
- * @return
- *     The ASCII code of the character at the given row/col.
- */
-static int guac_terminal_get_char(guac_terminal* terminal, int row, int col) {
-    guac_terminal_buffer_row* buffer_row = guac_terminal_buffer_get_row(terminal->buffer, row, 0);
-    guac_terminal_char* ascii_char = &(buffer_row->characters[col]);
-
-    return ascii_char->value;
-}
-
-/**
  * Selection of a word during a double click event.
  *  - Fetching the character under the mouse cursor.
  *  - Determining the type of character :
@@ -1852,13 +1831,16 @@ static int guac_terminal_get_char(guac_terminal* terminal, int row, int col) {
  */
 static void guac_terminal_double_click(guac_terminal* terminal, int row, int col) {
 
-    /* (char)10 behind cursor */
-    int cursor_char = guac_terminal_get_char(terminal, row, col);
+    /* Get buffer row and char behind cursor */
+    guac_terminal_buffer_row* buffer_row = guac_terminal_buffer_get_row(terminal->buffer, row, 0);
+    int cursor_char = buffer_row->characters[col].value;
 
     /* Position of the word behind cursor. 
-     * Default = col required to select a char if not a word and not blank. */
-    int word_head = col;
-    int word_tail = col;
+     * Default = col/row required to select a char if not a word and not blank. */
+    int word_col_head = col;
+    int word_col_tail = col;
+    int word_row_head = row;
+    int word_row_tail = row;
     int flag;
 
     /* The function used to calculate the word borders */
@@ -1875,19 +1857,136 @@ static void guac_terminal_double_click(guac_terminal* terminal, int row, int col
     if (is_part_of_word != NULL) {
         /* Get word head*/
         do {
-            flag = guac_terminal_get_char(terminal, row, word_head-1);
-        } while (is_part_of_word(flag) && (word_head >= 0 && word_head <= terminal->display->width) && word_head--);
+
+            /* Buffer row to get */
+            int current_row = word_row_head;
+            int current_col = word_col_head;
+
+            /* Bound of screen reached: get previous row */
+            if (word_col_head == 0)
+                current_row--;
+
+            /* Get current buffer row */
+            buffer_row = guac_terminal_buffer_get_row(terminal->buffer, current_row, 0);
+
+            /* If we are on the previous row */
+            if (current_row < word_row_head) {
+
+                /* Line not wrapped: stop, it's the word boundary */
+                if (!buffer_row->wrapped_row)
+                    break;
+
+                /* Go to last column of this row */
+                current_col = buffer_row->length;
+            }
+
+            /* Get char of the current row/column */
+            flag = buffer_row->characters[current_col-1].value;
+
+            /* Word boundary reached, stop */
+            if (!is_part_of_word(flag))
+                break;
+
+            /* Store new position on previous row */
+            if (current_row < word_row_head) {
+                word_row_head = current_row;
+                word_col_head = current_col;
+            }
+
+        } while (word_col_head >= 0 && word_col_head--);
 
         /* Get word tail */
         do {
-            flag = guac_terminal_get_char(terminal, row, word_tail+1);
-        } while (is_part_of_word(flag) && (word_tail >= 0 && word_tail <= terminal->display->width) && word_tail++);
+
+            /* Get current buffer row */
+            buffer_row = guac_terminal_buffer_get_row(terminal->buffer, word_row_tail, 0);
+
+            /* Bound of screen reached and row is wrapped: get next row */
+            if (word_col_tail == buffer_row->length - 1 && buffer_row->wrapped_row) {
+
+                /* Get next buffer row */
+                guac_terminal_buffer_row* next_buffer_row =
+                        guac_terminal_buffer_get_row(terminal->buffer, word_row_tail + 1, 0);
+
+                /* Get first char of the next row */
+                flag = next_buffer_row->characters[0].value;
+
+            }
+
+            /* Otherwise, get char of next column on current row */
+            else
+                flag = buffer_row->characters[word_col_tail+1].value;
+
+            /* Word boundary reached, stop */
+            if (!is_part_of_word(flag))
+                break;
+
+            /* Store new position on next row */
+            if (word_col_tail == buffer_row->length - 1 && buffer_row->wrapped_row) {
+                word_row_tail++;
+                word_col_tail = 0;
+            }
+
+            /* Or go to next column of current row */
+            else
+                word_col_tail++;
+
+        } while (word_col_tail <= buffer_row->length);
     }
 
     /* Select and add to clipboard the "word" */
-    guac_terminal_select_start(terminal, row, word_head);
-    guac_terminal_select_update(terminal, row, word_tail);
+    guac_terminal_select_start(terminal, word_row_head, word_col_head);
+    guac_terminal_select_update(terminal, word_row_tail, word_col_tail);
 
+}
+
+/**
+ * Selection of a line during a triple click event.
+ *  - Get buffer row boundaries if it has been wrapped.
+ *  - Visual selection of the line.
+ *  - Adding it to clipboard.
+ *
+ * @param terminal
+ *     The terminal that received a triple click event.
+ *
+ * @param row
+ *     The row where is the mouse at the triple click event.
+ * 
+ * @param col
+ *     The column where is the mouse at the triple click event.
+ */
+static void guac_terminal_triple_click(guac_terminal* terminal, int row, int col) {
+
+    /* Temporarily reading previous and next lines */
+    guac_terminal_buffer_row* buffer_row;
+
+    /* Final boundary rows */
+    int top_row = row;
+    int bottom_row = row;
+
+    /* Get top boundary */
+    do {
+
+        /* Read previous buffer row */
+        buffer_row = guac_terminal_buffer_get_row(terminal->buffer, top_row - 1, 0);
+
+    /* Go to the previous row if it is wrapped */
+    } while (buffer_row->wrapped_row && top_row--);
+
+    /* Get bottom boundary */
+    do {
+
+        /* Read current buffer row */
+        buffer_row = guac_terminal_buffer_get_row(terminal->buffer, bottom_row, 0);
+
+    /* Go to the next row if current row is wrapped */
+    } while (buffer_row->wrapped_row && bottom_row++);
+
+    /* Start selection on first col of top_row */
+    guac_terminal_select_start(terminal, top_row, 0);
+
+    /* End selection on last col of bottom_row */
+    guac_terminal_select_update(terminal, bottom_row, buffer_row->length - 1);
 }
 
 static int __guac_terminal_send_mouse(guac_terminal* term, guac_user* user,
@@ -1978,8 +2077,7 @@ static int __guac_terminal_send_mouse(guac_terminal* term, guac_user* user,
 
                     /* third click or more = line selection */
                     default:
-                        guac_terminal_select_start(term, row, 0);
-                        guac_terminal_select_update(term, row, term->display->width);
+                        guac_terminal_triple_click(term, row, col);
                         break;
                 }
             }
