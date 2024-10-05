@@ -50,6 +50,20 @@ guac_terminal_buffer* guac_terminal_buffer_alloc(int rows,
         const guac_terminal_char* default_character);
 
 /**
+ * Reallocate existing buffer to add or remove rows.
+ *
+ * @param buffer
+ *      The buffer to reallocate.
+ *
+ * @param rows
+ *      Number of scrollback rows
+ *
+ * @return
+ *      The reallocated buffer.
+ */
+guac_terminal_buffer* guac_terminal_buffer_realloc(guac_terminal_buffer* buffer, int rows);
+
+/**
  * Frees the given buffer.
  */
 void guac_terminal_buffer_free(guac_terminal_buffer* buffer);

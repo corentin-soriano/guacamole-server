@@ -137,6 +137,61 @@ guac_terminal_buffer* guac_terminal_buffer_alloc(int rows,
 
 }
 
+guac_terminal_buffer* guac_terminal_buffer_realloc(guac_terminal_buffer* buffer, int rows) {
+
+    int i;
+    guac_terminal_buffer_row* row;
+
+    /* No change */
+    if (rows == buffer->available)
+        return buffer;
+
+    /* Too many rows */
+    if (rows < buffer->available) {
+
+        /* Last buffer row */
+        row = buffer->rows + buffer->available;
+
+        /* Free excess rows characters */
+        for (i=rows; i>buffer->available; i++) {
+
+            /* Free row characters */
+            guac_mem_free(row->characters);
+
+            /* Previous row */
+            row++;
+        }
+    }
+
+    /* Realloc buffer rows */
+    buffer->rows = guac_mem_realloc(buffer->rows, sizeof(guac_terminal_buffer_row) * rows);
+
+    /* Init new rows characters */
+    if (rows > buffer->available) {
+
+        /* First uninitialized buffer row */
+        row = buffer->rows + buffer->available;
+
+        /* Init new scrollback rows */
+        for (i=buffer->available; i<rows; i++) {
+
+            /* Allocate row  */
+            row->available = GUAC_TERMINAL_BUFFER_ROW_MIN_SIZE;
+            row->length = 0;
+            row->wrapped_row = false;
+            row->characters = guac_mem_alloc(sizeof(guac_terminal_char), row->available);
+
+            /* Next row */
+            row++;
+        }
+    }
+
+    /* Update scrollback length */
+    buffer->available = rows;
+
+    return buffer;
+}
+
 void guac_terminal_buffer_free(guac_terminal_buffer* buffer) {
 
     int i;

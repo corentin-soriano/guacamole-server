@@ -395,10 +395,6 @@ guac_terminal* guac_terminal_create(guac_client* client,
     if (initial_scrollback < GUAC_TERMINAL_MAX_ROWS)
         initial_scrollback = GUAC_TERMINAL_MAX_ROWS;
 
-    /* Init current and alternate buffer */
-    term->current_buffer = term->normal_buffer = guac_terminal_buffer_alloc(initial_scrollback, &default_char);
-    term->alternate_buffer = guac_terminal_buffer_alloc(GUAC_TERMINAL_MAX_ROWS, &default_char);
-
     /* Init display */
     term->display = guac_terminal_display_alloc(client,
             options->font_name, options->font_size, options->dpi,
@@ -443,6 +439,10 @@ guac_terminal* guac_terminal_create(guac_client* client,
     /* Set pixel size */
     term->height = adjusted_height;
     term->width = adjusted_width;
+
+    /* Init current and alternate buffer */
+    term->current_buffer = term->normal_buffer = guac_terminal_buffer_alloc(initial_scrollback, &default_char);
+    term->alternate_buffer = guac_terminal_buffer_alloc(term->term_height, &default_char);
 
     /* Open STDIN pipe */
     if (pipe(term->stdin_pipe_fd)) {
@@ -1357,6 +1357,9 @@ int guac_terminal_resize(guac_terminal* terminal, int width, int height) {
         /* Reset scroll region */
         terminal->scroll_end = rows - 1;
     }
+
+    /* Realloc alternate_buffer to fit terminal height */
+    terminal->alternate_buffer = guac_terminal_buffer_realloc(terminal->alternate_buffer, terminal->term_height);
 
     /* Notify scrollbar of resize */
     guac_terminal_scrollbar_parent_resized(terminal->scrollbar, 
